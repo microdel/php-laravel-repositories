@@ -2,6 +2,7 @@
 
 namespace Saritasa\Repositories\Base;
 
+use DB;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -40,6 +41,11 @@ class Repository implements IRepository
     /** @var Model */
     private $model;
 
+    /**
+     * Repository constructor.
+     *
+     * @throws RepositoryException
+     */
     public function __construct()
     {
         if (!$this->modelClass) {
@@ -51,7 +57,7 @@ class Repository implements IRepository
             throw new RepositoryException($this, "Error creating instance of model $this->modelClass", 500, $e);
         }
         if (!is_a($this->model, Model::class, true)) {
-            throw new RepositoryException($this, "$this->modelClass must extend ".Model::class);
+            throw new RepositoryException($this, "$this->modelClass must extend " . Model::class);
         }
     }
 
@@ -74,6 +80,11 @@ class Repository implements IRepository
         return $result;
     }
 
+    /**
+     * Returns the class of model.
+     *
+     * @return string
+     */
     public function getModelClass(): string
     {
         return $this->modelClass;
@@ -81,6 +92,8 @@ class Repository implements IRepository
 
     /**
      * Get visible fields from model
+     *
+     * @return array
      */
     public function getVisibleFields()
     {
@@ -99,21 +112,42 @@ class Repository implements IRepository
         return [];
     }
 
+    /**
+     * Find a model by its primary key or throw an exception.
+     *
+     * @param mixed $id
+     * @return Model
+     */
     public function findOrFail($id): Model
     {
         return $this->query()->findOrFail($id);
     }
 
+    /**
+     * Find a model by its primary key or return fresh model instance.
+     *
+     * @param $id
+     * @return Model
+     */
     public function findOrNew($id): Model
     {
         return $this->query()->findOrNew($id);
     }
 
-    public function findWhere(array $fieldValues)//: Model
+    /**
+     * Find a model by specified rules or return null if model not found.
+     *
+     * @param array $fieldValues
+     * @return Model|null
+     */
+    public function findWhere(array $fieldValues): ?Model
     {
         return $this->query()->where($fieldValues)->first();
     }
 
+    /**
+     * @deprecated Use save() instead to create the model.
+     */
     public function create(Model $model): Model
     {
         if (!$model->save()) {
@@ -122,14 +156,49 @@ class Repository implements IRepository
         return $model;
     }
 
+    /**
+     * Saves the model.
+     *
+     * @param Model $model The model for saving
+     * @return Model
+     * @throws RepositoryException
+     */
     public function save(Model $model): Model
     {
         if (!$model->save()) {
-            throw new RepositoryException($this, "Cannot update $this->modelClass record");
+            if ($model->exists) {
+                throw new RepositoryException($this, "Cannot update $this->modelClass record");
+            } else {
+                throw new RepositoryException($this, "Cannot create $this->modelClass record");
+            }
         }
+
         return $model;
     }
 
+    /**
+     * Saves models.
+     *
+     * @param Model[] $models Models for saving
+     * @return array
+     */
+    public function saveMany(array $models): array
+    {
+        $this->transaction(function () use ($models) {
+            foreach ($models as $model) {
+                $model->saveOrFail();
+            }
+        });
+
+        return $models;
+    }
+
+    /**
+     * Deletes the model.
+     *
+     * @param Model $model The model for deleting
+     * @throws RepositoryException
+     */
     public function delete(Model $model)
     {
         if (!$model->delete()) {
@@ -137,22 +206,59 @@ class Repository implements IRepository
         }
     }
 
+    /**
+     * Deletes models.
+     *
+     * @param array $models Models for deleting
+     */
+    public function deleteMany(array $models)
+    {
+        $this->transaction(function () use ($models) {
+            foreach ($models as $model) {
+                $this->delete($model);
+            }
+        });
+    }
+
+    /**
+     * Returns all models.
+     *
+     * @return Collection
+     */
     public function get(): Collection
     {
         return $this->query()->get();
     }
 
+    /**
+     * Returns models filtered by specified rules.
+     *
+     * @param array $fieldValues Rules for filtration
+     * @return Collection
+     */
     public function getWhere(array $fieldValues): Collection
     {
         return $this->query()->where($fieldValues)->get();
     }
 
+    /**
+     * Returns the models split into pages.
+     *
+     * @param PagingInfo $paging Paging data
+     * @param array|null $fieldValues Rules for filtration
+     * @return LengthAwarePaginator
+     */
     public function getPage(PagingInfo $paging, array $fieldValues = null): LengthAwarePaginator
     {
         $query = $this->query()->where($fieldValues);
         return $query->paginate($paging->pageSize, ['*'], 'page', $paging->page);
     }
 
+    /**
+     * @param CursorRequest $cursor Requested cursor parameters
+     * @param array|null $fieldValues Rules for filtration
+     * @return CursorResult
+     */
     public function getCursorPage(CursorRequest $cursor, array $fieldValues = null): CursorResult
     {
         return $this->toCursorResult($cursor, $this->query()->where($fieldValues));
@@ -171,7 +277,7 @@ class Repository implements IRepository
     {
         return $this->toCursorResult($cursor, $query);
     }
-    
+
     /**
      * @param CursorRequest $cursor Requested cursor parameters
      * @param Builder|QueryBuilder $query
@@ -182,8 +288,23 @@ class Repository implements IRepository
         return (new CursorQueryBuilder($cursor, $query))->getCursor();
     }
 
+    /**
+     * Returns the query builder.
+     *
+     * @return Builder
+     */
     protected function query(): Builder
     {
         return $this->model->query();
+    }
+
+    /**
+     * To run a set of operations within a database transaction.
+     *
+     * @param callable $callback
+     */
+    public function transaction(callable $callback)
+    {
+        return DB::transaction($callback);
     }
 }

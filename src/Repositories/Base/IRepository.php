@@ -23,7 +23,6 @@ interface IRepository
     public function findOrFail($id): Model;
     public function findOrNew($id): Model;
     public function findWhere(array $fieldValues); // : Model;
-    public function create(Model $model): Model;
     public function save(Model $model): Model;
     public function delete(Model $model);
     public function get(): Collection;
